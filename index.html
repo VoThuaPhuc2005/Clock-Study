@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Theo Dõi Thời Gian Làm Việc Song Song</title>
+    <title>Theo Dõi Thời Gian Sử Dụng Máy Tính</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #f0f2f5; padding: 20px; display: flex; justify-content: center; }
@@ -17,6 +17,10 @@
         .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
         .user-card { background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 10px; padding: 20px; text-align: center; position: relative; }
         .user-card.active-user { border-color: #0d6efd; background: #f0f7ff; }
+        
+        /* Ảnh đại diện */
+        .user-avatar { width: 90px; height: 90px; border-radius: 50%; object-fit: cover; border: 3px solid #0d6efd; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+        
         .user-name { font-size: 1.1rem; font-weight: bold; margin-bottom: 10px; color: #495057; }
         .timer-display { font-size: 2.2rem; font-weight: bold; color: #0d6efd; margin: 10px 0; font-family: monospace; }
         .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #adb5bd; margin-right: 5px; }
@@ -35,7 +39,6 @@
         th { background-color: #0d6efd; color: white; }
         tr:nth-child(even) { background-color: #f8f9fa; }
         
-        /* Hàng tổng kết tháng */
         .month-summary { background-color: #e2e3e5 !important; font-weight: bold; color: #055160; border-top: 2px solid #0d6efd; border-bottom: 2px solid #0d6efd; }
     </style>
 
@@ -44,7 +47,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-        // ⚠️ Vui lòng đảm bảo các thông số bên dưới khớp với Firebase của bạn
         const firebaseConfig = {
             apiKey: "AIzaSyCNLSyrHap4ohc_ZqlsoFvHTGgk48CQ_I8",
             authDomain: "study-clock-ad976.firebaseapp.com",
@@ -60,12 +62,12 @@
         const db = getDatabase(app);
 
         let myRole = 'user_a';
-        let timerInterval = null;
+        let uiInterval = null;
         let todayStr = new Date().toISOString().split('T')[0];
 
         let dbData = {
-            user_a: { seconds: 0, isRunning: false },
-            user_b: { seconds: 0, isRunning: false }
+            user_a: { accumulated: 0, startTime: null, isRunning: false },
+            user_b: { accumulated: 0, startTime: null, isRunning: false }
         };
 
         window.changeRole = function() {
@@ -80,29 +82,43 @@
             return `${h}:${m}:${s}`;
         }
 
-        // Lắng nghe dữ liệu thời gian thực hôm nay
+        // Tính thời gian thực tế chạy dựa trên Mốc thời gian (Timestamp)
+        function getRealSeconds(userData) {
+            if (!userData) return 0;
+            let total = userData.accumulated || 0;
+            if (userData.isRunning && userData.startTime) {
+                const now = Date.now();
+                total += Math.floor((now - userData.startTime) / 1000);
+            }
+            return total;
+        }
+
+        // Lắng nghe dữ liệu thời gian thực
         const todayRef = ref(db, `usage/${todayStr}`);
         onValue(todayRef, (snapshot) => {
             const data = snapshot.val();
             if (data) {
-                dbData.user_a = data.user_a || { seconds: 0, isRunning: false };
-                dbData.user_b = data.user_b || { seconds: 0, isRunning: false };
+                dbData.user_a = data.user_a || { accumulated: 0, startTime: null, isRunning: false };
+                dbData.user_b = data.user_b || { accumulated: 0, startTime: null, isRunning: false };
             }
             updateUI();
         });
 
-        // Lắng nghe toàn bộ dữ liệu để hiển thị bảng & tính tổng tháng
         const historyRef = ref(db, 'usage');
         onValue(historyRef, (snapshot) => {
             const allData = snapshot.val();
             renderHistory(allData);
         });
 
+        // Cập nhật giao diện mượt mà
         function updateUI() {
-            document.getElementById('time-a').innerText = formatTime(dbData.user_a.seconds);
+            const secA = getRealSeconds(dbData.user_a);
+            const secB = getRealSeconds(dbData.user_b);
+
+            document.getElementById('time-a').innerText = formatTime(secA);
             document.getElementById('dot-a').className = `status-dot ${dbData.user_a.isRunning ? 'running' : ''}`;
             
-            document.getElementById('time-b').innerText = formatTime(dbData.user_b.seconds);
+            document.getElementById('time-b').innerText = formatTime(secB);
             document.getElementById('dot-b').className = `status-dot ${dbData.user_b.isRunning ? 'running' : ''}`;
 
             document.getElementById('card-a').className = `user-card ${myRole === 'user_a' ? 'active-user' : ''}`;
@@ -115,30 +131,39 @@
             document.getElementById('btn-pause-b').disabled = (myRole !== 'user_b' || !dbData.user_b.isRunning);
         }
 
-        window.startTimer = function(role) {
-            if (timerInterval) clearInterval(timerInterval);
-            set(ref(db, `usage/${todayStr}/${role}/isRunning`), true);
+        // Vòng lặp cập nhật màn hình hiển thị mỗi giây
+        if (!uiInterval) {
+            uiInterval = setInterval(updateUI, 1000);
+        }
 
-            timerInterval = setInterval(() => {
-                dbData[role].seconds += 1;
-                set(ref(db, `usage/${todayStr}/${role}/seconds`), dbData[role].seconds);
-            }, 1000);
+        window.startTimer = function(role) {
+            const now = Date.now();
+            set(ref(db, `usage/${todayStr}/${role}`), {
+                accumulated: getRealSeconds(dbData[role]),
+                startTime: now,
+                isRunning: true
+            });
         };
 
         window.pauseTimer = function(role) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-            set(ref(db, `usage/${todayStr}/${role}/isRunning`), false);
+            const currentTotal = getRealSeconds(dbData[role]);
+            set(ref(db, `usage/${todayStr}/${role}`), {
+                accumulated: currentTotal,
+                startTime: null,
+                isRunning: false
+            });
         };
 
         window.resetTimer = function(role) {
             if (confirm("Xóa dữ liệu ngày hôm nay của bạn?")) {
-                pauseTimer(role);
-                set(ref(db, `usage/${todayStr}/${role}/seconds`), 0);
+                set(ref(db, `usage/${todayStr}/${role}`), {
+                    accumulated: 0,
+                    startTime: null,
+                    isRunning: false
+                });
             }
         };
 
-        // Hàm vẽ bảng lịch sử & Tổng kết theo tháng
         function renderHistory(allData) {
             const tbody = document.getElementById('history-table');
             tbody.innerHTML = '';
@@ -150,26 +175,23 @@
 
             const dates = Object.keys(allData).sort().reverse();
             
-            // Gom nhóm dữ liệu theo Tháng (YYYY-MM)
             const groupedByMonth = {};
             dates.forEach(date => {
-                const monthKey = date.substring(0, 7); // Lấy YYYY-MM
+                const monthKey = date.substring(0, 7);
                 if (!groupedByMonth[monthKey]) {
                     groupedByMonth[monthKey] = [];
                 }
                 groupedByMonth[monthKey].push(date);
             });
 
-            // Duyệt qua từng tháng để vẽ ngày và dòng Tổng Tháng
             Object.keys(groupedByMonth).sort().reverse().forEach(monthKey => {
                 let monthTotalA = 0;
                 let monthTotalB = 0;
 
-                // Các ngày trong tháng
                 groupedByMonth[monthKey].forEach(date => {
                     const dayData = allData[date];
-                    const secA = dayData.user_a ? dayData.user_a.seconds : 0;
-                    const secB = dayData.user_b ? dayData.user_b.seconds : 0;
+                    const secA = getRealSeconds(dayData.user_a);
+                    const secB = getRealSeconds(dayData.user_b);
 
                     monthTotalA += secA;
                     monthTotalB += secB;
@@ -183,7 +205,6 @@
                     tbody.appendChild(tr);
                 });
 
-                // Dòng TỔNG TÍCH LŨY THÁNG
                 const summaryTr = document.createElement('tr');
                 summaryTr.className = 'month-summary';
                 summaryTr.innerHTML = `
@@ -199,7 +220,7 @@
 <body>
 
 <div class="container">
-    <h1>⏱️ Theo Dõi Thời Gian Học Tập - Làm Việc</h1>
+    <h1>⏱️ Theo Dõi Thời Gian Sử Dụng Máy Tính</h1>
     
     <div class="role-selector">
         <label for="roleSelect">💻 Thiết bị này là của:</label>
@@ -212,6 +233,7 @@
     <div class="dashboard">
         <!-- Khung Peko -->
         <div class="user-card" id="card-a">
+            <img src="peko.png" alt="Peko" class="user-avatar" onerror="this.style.display='none'">
             <div class="user-name"><span class="status-dot" id="dot-a"></span> Đoàn Thiên Bình - Peko - 🏠</div>
             <div class="timer-display" id="time-a">00:00:00</div>
             <div class="controls">
@@ -223,6 +245,7 @@
 
         <!-- Khung Pin -->
         <div class="user-card" id="card-b">
+            <img src="pin.png" alt="Pin" class="user-avatar" onerror="this.style.display='none'">
             <div class="user-name"><span class="status-dot" id="dot-b"></span> Võ Thừa Phúc - Pin - ⚡</div>
             <div class="timer-display" id="time-b">00:00:00</div>
             <div class="controls">
