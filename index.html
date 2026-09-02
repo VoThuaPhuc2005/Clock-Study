@@ -63,7 +63,7 @@
 
         let myRole = 'user_a';
         let uiInterval = null;
-        let todayStr = new Date().toISOString().split('T')[0];
+        let todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
 
         let dbData = {
             user_a: { accumulated: 0, startTime: null, isRunning: false },
