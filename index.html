@@ -10,9 +10,13 @@
         .container { width: 100%; max-width: 850px; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
         h1, h2 { text-align: center; color: #1c2d42; margin-bottom: 20px; }
         
-        .role-selector { display: flex; justify-content: center; align-items: center; gap: 10px; margin-bottom: 25px; background: #e9ecef; padding: 12px; border-radius: 8px; }
-        .role-selector select { padding: 8px 15px; font-size: 1rem; font-weight: bold; border-radius: 6px; border: 1px solid #ced4da; cursor: pointer; }
+        .role-selector { display: flex; justify-content: center; align-items: center; gap: 10px; margin-bottom: 20px; background: #e9ecef; padding: 12px; border-radius: 8px; }
+        .role-selector select, .month-filter select { padding: 8px 15px; font-size: 1rem; font-weight: bold; border-radius: 6px; border: 1px solid #ced4da; cursor: pointer; }
 
+        /* Bảng điều khiển chung */
+        .global-controls { text-align: center; margin-bottom: 25px; padding: 15px; background: #e7f1ff; border: 2px dashed #0d6efd; border-radius: 10px; }
+        .global-controls h3 { margin-bottom: 10px; color: #0a58ca; }
+        
         /* Dashboard 2 người */
         .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
         .user-card { background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 10px; padding: 20px; text-align: center; position: relative; }
@@ -26,15 +30,20 @@
         .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #adb5bd; margin-right: 5px; }
         .status-dot.running { background: #198754; box-shadow: 0 0 8px #198754; }
 
-        .controls { display: flex; justify-content: center; gap: 10px; margin-top: 15px; }
-        button { padding: 8px 16px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        .controls { display: flex; justify-content: center; gap: 8px; margin-top: 15px; flex-wrap: wrap; }
+        button { padding: 8px 14px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; }
         .btn-start { background-color: #198754; color: white; }
         .btn-pause { background-color: #ffc107; color: #212529; }
         .btn-reset { background-color: #dc3545; color: white; }
+        .btn-both { background-color: #0d6efd; color: white; font-size: 1rem; padding: 10px 20px; margin: 0 5px; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+        /* Bộ lọc tháng */
+        .table-header-box { display: flex; justify-content: space-between; align-items: center; margin-top: 25px; margin-bottom: 10px; flex-wrap: wrap; gap: 10px; }
+        .month-filter { display: flex; align-items: center; gap: 8px; font-weight: bold; color: #1c2d42; }
+
         /* Bảng lịch sử */
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        table { width: 100%; border-collapse: collapse; }
         th, td { border: 1px solid #dee2e6; padding: 10px; text-align: center; }
         th { background-color: #0d6efd; color: white; }
         tr:nth-child(even) { background-color: #f8f9fa; }
@@ -63,7 +72,14 @@
 
         let myRole = 'user_a';
         let uiInterval = null;
-        let todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+        let globalAllData = null; // Lưu cache toàn bộ dữ liệu
+
+        // Cố định ngày theo múi giờ Việt Nam (Asia/Ho_Chi_Minh)
+        function getVNTodayStr() {
+            return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+        }
+
+        let todayStr = getVNTodayStr();
 
         let dbData = {
             user_a: { accumulated: 0, startTime: null, isRunning: false },
@@ -82,10 +98,9 @@
             return `${h}:${m}:${s}`;
         }
 
-        // Tính thời gian thực tế chạy dựa trên Mốc thời gian (Timestamp)
         function getRealSeconds(userData) {
             if (!userData) return 0;
-            let total = userData.accumulated || 0;
+            let total = userData.accumulated || userData.seconds || 0;
             if (userData.isRunning && userData.startTime) {
                 const now = Date.now();
                 total += Math.floor((now - userData.startTime) / 1000);
@@ -93,7 +108,7 @@
             return total;
         }
 
-        // Lắng nghe dữ liệu thời gian thực
+        // Lắng nghe dữ liệu ngày hôm nay (Giờ VN)
         const todayRef = ref(db, `usage/${todayStr}`);
         onValue(todayRef, (snapshot) => {
             const data = snapshot.val();
@@ -104,13 +119,14 @@
             updateUI();
         });
 
+        // Lắng nghe toàn bộ dữ liệu lịch sử
         const historyRef = ref(db, 'usage');
         onValue(historyRef, (snapshot) => {
-            const allData = snapshot.val();
-            renderHistory(allData);
+            globalAllData = snapshot.val();
+            updateMonthDropdown(globalAllData);
+            renderHistory();
         });
 
-        // Cập nhật giao diện mượt mà
         function updateUI() {
             const secA = getRealSeconds(dbData.user_a);
             const secB = getRealSeconds(dbData.user_b);
@@ -124,14 +140,13 @@
             document.getElementById('card-a').className = `user-card ${myRole === 'user_a' ? 'active-user' : ''}`;
             document.getElementById('card-b').className = `user-card ${myRole === 'user_b' ? 'active-user' : ''}`;
 
-            document.getElementById('btn-start-a').disabled = (myRole !== 'user_a' || dbData.user_a.isRunning);
-            document.getElementById('btn-pause-a').disabled = (myRole !== 'user_a' || !dbData.user_a.isRunning);
+            document.getElementById('btn-start-a').disabled = dbData.user_a.isRunning;
+            document.getElementById('btn-pause-a').disabled = !dbData.user_a.isRunning;
             
-            document.getElementById('btn-start-b').disabled = (myRole !== 'user_b' || dbData.user_b.isRunning);
-            document.getElementById('btn-pause-b').disabled = (myRole !== 'user_b' || !dbData.user_b.isRunning);
+            document.getElementById('btn-start-b').disabled = dbData.user_b.isRunning;
+            document.getElementById('btn-pause-b').disabled = !dbData.user_b.isRunning;
         }
 
-        // Vòng lặp cập nhật màn hình hiển thị mỗi giây
         if (!uiInterval) {
             uiInterval = setInterval(updateUI, 1000);
         }
@@ -155,7 +170,7 @@
         };
 
         window.resetTimer = function(role) {
-            if (confirm("Xóa dữ liệu ngày hôm nay của bạn?")) {
+            if (confirm("Xóa dữ liệu ngày hôm nay của người này?")) {
                 set(ref(db, `usage/${todayStr}/${role}`), {
                     accumulated: 0,
                     startTime: null,
@@ -164,32 +179,96 @@
             }
         };
 
-        function renderHistory(allData) {
+        window.startBoth = function() {
+            const now = Date.now();
+            if (!dbData.user_a.isRunning) {
+                set(ref(db, `usage/${todayStr}/user_a`), {
+                    accumulated: getRealSeconds(dbData.user_a),
+                    startTime: now,
+                    isRunning: true
+                });
+            }
+            if (!dbData.user_b.isRunning) {
+                set(ref(db, `usage/${todayStr}/user_b`), {
+                    accumulated: getRealSeconds(dbData.user_b),
+                    startTime: now,
+                    isRunning: true
+                });
+            }
+        };
+
+        window.pauseBoth = function() {
+            if (dbData.user_a.isRunning) pauseTimer('user_a');
+            if (dbData.user_b.isRunning) pauseTimer('user_b');
+        };
+
+        // Cập nhật danh sách các Tháng vào Dropdown Bộ Lọc
+        function updateMonthDropdown(allData) {
+            if (!allData) return;
+            const select = document.getElementById('monthSelect');
+            const currentSelected = select.value;
+            
+            const months = new Set();
+            Object.keys(allData).forEach(date => {
+                if (date.length >= 7) months.add(date.substring(0, 7));
+            });
+
+            // Lấy tháng hiện tại
+            const currentMonthKey = todayStr.substring(0, 7);
+            months.add(currentMonthKey);
+
+            const sortedMonths = Array.from(months).sort().reverse();
+            select.innerHTML = '<option value="ALL">-- Tất cả các tháng --</option>';
+
+            sortedMonths.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.innerText = `Tháng ${m}`;
+                select.appendChild(opt);
+            });
+
+            // Nếu chưa chọn gì, mặc định chọn Tháng Hiện Tại
+            if (!currentSelected) {
+                select.value = currentMonthKey;
+            } else {
+                select.value = currentSelected;
+            }
+        }
+
+        // Lọc và vẽ lại bảng lịch sử
+        window.renderHistory = function() {
             const tbody = document.getElementById('history-table');
             tbody.innerHTML = '';
 
-            if (!allData) {
+            if (!globalAllData) {
                 tbody.innerHTML = '<tr><td colspan="3">Chưa có dữ liệu</td></tr>';
                 return;
             }
 
-            const dates = Object.keys(allData).sort().reverse();
+            const selectedMonth = document.getElementById('monthSelect').value;
+            const dates = Object.keys(globalAllData).sort().reverse();
             
             const groupedByMonth = {};
             dates.forEach(date => {
                 const monthKey = date.substring(0, 7);
-                if (!groupedByMonth[monthKey]) {
-                    groupedByMonth[monthKey] = [];
-                }
+                // Nếu lọc theo tháng cụ thể
+                if (selectedMonth !== 'ALL' && monthKey !== selectedMonth) return;
+
+                if (!groupedByMonth[monthKey]) groupedByMonth[monthKey] = [];
                 groupedByMonth[monthKey].push(date);
             });
+
+            if (Object.keys(groupedByMonth).length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3">Không có dữ liệu trong tháng này</td></tr>';
+                return;
+            }
 
             Object.keys(groupedByMonth).sort().reverse().forEach(monthKey => {
                 let monthTotalA = 0;
                 let monthTotalB = 0;
 
                 groupedByMonth[monthKey].forEach(date => {
-                    const dayData = allData[date];
+                    const dayData = globalAllData[date];
                     const secA = getRealSeconds(dayData.user_a);
                     const secB = getRealSeconds(dayData.user_b);
 
@@ -214,7 +293,7 @@
                 `;
                 tbody.appendChild(summaryTr);
             });
-        }
+        };
     </script>
 </head>
 <body>
@@ -228,6 +307,13 @@
             <option value="user_a">Đoàn Thiên Bình - Peko - 🏠</option>
             <option value="user_b">Võ Thừa Phúc - Pin - ⚡</option>
         </select>
+    </div>
+
+    <!-- KHUNG ĐIỀU KHIỂN CẢ HAI -->
+    <div class="global-controls">
+        <h3>⚡ Điều Khiển Song Song 2 Đồng Hồ</h3>
+        <button class="btn-both btn-start" onclick="startBoth()">▶️ Bắt Đầu Cả Hai</button>
+        <button class="btn-both btn-pause" onclick="pauseBoth()">⏸️ Dừng Cả Hai</button>
     </div>
 
     <div class="dashboard">
@@ -256,7 +342,17 @@
         </div>
     </div>
 
-    <h2>📅 Bảng Tổng Kết Theo Ngày & Tháng</h2>
+    <!-- TIÊU ĐỀ BẢNG KÈM BỘ LỌC THÁNG -->
+    <div class="table-header-box">
+        <h2>📅 Bảng Tổng Kết Lịch Sử</h2>
+        <div class="month-filter">
+            <label for="monthSelect">🔍 Xem theo tháng:</label>
+            <select id="monthSelect" onchange="renderHistory()">
+                <!-- Các tháng tự động đổ vào đây -->
+            </select>
+        </div>
+    </div>
+
     <table>
         <thead>
             <tr>
@@ -266,7 +362,7 @@
             </tr>
         </thead>
         <tbody id="history-table">
-            <!-- Lịch sử và tổng tháng hiển thị ở đây -->
+            <!-- Lịch sử hiển thị ở đây -->
         </tbody>
     </table>
 </div>
