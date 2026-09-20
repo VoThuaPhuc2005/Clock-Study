@@ -22,6 +22,7 @@
         .user-card { background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 10px; padding: 20px; text-align: center; position: relative; }
         .user-card.active-user { border-color: #0d6efd; background: #f0f7ff; }
         
+        /* Ảnh đại diện */
         .user-avatar { width: 90px; height: 90px; border-radius: 50%; object-fit: cover; border: 3px solid #0d6efd; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
         
         .user-name { font-size: 1.1rem; font-weight: bold; margin-bottom: 10px; color: #495057; }
@@ -71,8 +72,9 @@
 
         let myRole = 'user_a';
         let uiInterval = null;
-        let globalAllData = null;
+        let globalAllData = null; // Lưu cache toàn bộ dữ liệu
 
+        // Cố định ngày theo múi giờ Việt Nam (Asia/Ho_Chi_Minh)
         function getVNTodayStr() {
             return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
         }
@@ -90,7 +92,6 @@
         };
 
         function formatTime(sec) {
-            sec = Math.max(0, parseInt(sec) || 0);
             const h = Math.floor(sec / 3600).toString().padStart(2, '0');
             const m = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
             const s = (sec % 60).toString().padStart(2, '0');
@@ -107,7 +108,7 @@
             return total;
         }
 
-        // Lắng nghe dữ liệu ngày hôm nay
+        // Lắng nghe dữ liệu ngày hôm nay (Giờ VN)
         const todayRef = ref(db, `usage/${todayStr}`);
         onValue(todayRef, (snapshot) => {
             const data = snapshot.val();
@@ -201,23 +202,24 @@
             if (dbData.user_b.isRunning) pauseTimer('user_b');
         };
 
-        // Cập nhật danh sách các Tháng vào Dropdown
+        // Cập nhật danh sách các Tháng vào Dropdown Bộ Lọc
         function updateMonthDropdown(allData) {
+            if (!allData) return;
             const select = document.getElementById('monthSelect');
-            if (!select) return;
-
-            const prevValue = select.value;
-            const months = new Set();
+            const currentSelected = select.value;
             
-            if (allData) {
-                Object.keys(allData).forEach(date => {
-                    if (date && date.length >= 7) months.add(date.substring(0, 7));
-                });
-            }
+            const months = new Set();
+            Object.keys(allData).forEach(date => {
+                if (date.length >= 7) months.add(date.substring(0, 7));
+            });
 
-            select.innerHTML = '<option value="ALL">-- Tất cả các tháng --</option>';
+            // Lấy tháng hiện tại
+            const currentMonthKey = todayStr.substring(0, 7);
+            months.add(currentMonthKey);
 
             const sortedMonths = Array.from(months).sort().reverse();
+            select.innerHTML = '<option value="ALL">-- Tất cả các tháng --</option>';
+
             sortedMonths.forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m;
@@ -225,40 +227,39 @@
                 select.appendChild(opt);
             });
 
-            // Giữ lại lựa chọn trước đó nếu có, nếu không mặc định chọn Tất cả
-            if (prevValue && Array.from(select.options).some(o => o.value === prevValue)) {
-                select.value = prevValue;
+            // Nếu chưa chọn gì, mặc định chọn Tháng Hiện Tại
+            if (!currentSelected) {
+                select.value = currentMonthKey;
             } else {
-                select.value = 'ALL';
+                select.value = currentSelected;
             }
         }
 
-        // Render lịch sử an toàn
+        // Lọc và vẽ lại bảng lịch sử
         window.renderHistory = function() {
             const tbody = document.getElementById('history-table');
-            if (!tbody) return;
             tbody.innerHTML = '';
 
             if (!globalAllData) {
-                tbody.innerHTML = '<tr><td colspan="3">Đang tải dữ liệu...</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="3">Chưa có dữ liệu</td></tr>';
                 return;
             }
 
-            const monthSelectEle = document.getElementById('monthSelect');
-            const selectedMonth = monthSelectEle ? monthSelectEle.value : 'ALL';
+            const selectedMonth = document.getElementById('monthSelect').value;
             const dates = Object.keys(globalAllData).sort().reverse();
-
+            
             const groupedByMonth = {};
             dates.forEach(date => {
                 const monthKey = date.substring(0, 7);
-                if (selectedMonth && selectedMonth !== 'ALL' && monthKey !== selectedMonth) return;
+                // Nếu lọc theo tháng cụ thể
+                if (selectedMonth !== 'ALL' && monthKey !== selectedMonth) return;
 
                 if (!groupedByMonth[monthKey]) groupedByMonth[monthKey] = [];
                 groupedByMonth[monthKey].push(date);
             });
 
             if (Object.keys(groupedByMonth).length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3">Không có dữ liệu lịch sử</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="3">Không có dữ liệu trong tháng này</td></tr>';
                 return;
             }
 
@@ -267,7 +268,7 @@
                 let monthTotalB = 0;
 
                 groupedByMonth[monthKey].forEach(date => {
-                    const dayData = globalAllData[date] || {};
+                    const dayData = globalAllData[date];
                     const secA = getRealSeconds(dayData.user_a);
                     const secB = getRealSeconds(dayData.user_b);
 
@@ -347,7 +348,7 @@
         <div class="month-filter">
             <label for="monthSelect">🔍 Xem theo tháng:</label>
             <select id="monthSelect" onchange="renderHistory()">
-                <option value="ALL">-- Tất cả các tháng --</option>
+                <!-- Các tháng tự động đổ vào đây -->
             </select>
         </div>
     </div>
