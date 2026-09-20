@@ -22,7 +22,6 @@
         .user-card { background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 10px; padding: 20px; text-align: center; position: relative; }
         .user-card.active-user { border-color: #0d6efd; background: #f0f7ff; }
         
-        /* Ảnh đại diện */
         .user-avatar { width: 90px; height: 90px; border-radius: 50%; object-fit: cover; border: 3px solid #0d6efd; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
         
         .user-name { font-size: 1.1rem; font-weight: bold; margin-bottom: 10px; color: #495057; }
@@ -72,9 +71,9 @@
 
         let myRole = 'user_a';
         let uiInterval = null;
-        let globalAllData = null; // Lưu cache toàn bộ dữ liệu
+        let globalAllData = null;
 
-        // Cố định ngày theo múi giờ Việt Nam (Asia/Ho_Chi_Minh)
+        // Cố định ngày theo múi giờ Việt Nam
         function getVNTodayStr() {
             return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
         }
@@ -92,6 +91,7 @@
         };
 
         function formatTime(sec) {
+            sec = Math.max(0, parseInt(sec) || 0);
             const h = Math.floor(sec / 3600).toString().padStart(2, '0');
             const m = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
             const s = (sec % 60).toString().padStart(2, '0');
@@ -108,7 +108,7 @@
             return total;
         }
 
-        // Lắng nghe dữ liệu ngày hôm nay (Giờ VN)
+        // Lắng nghe dữ liệu ngày hôm nay
         const todayRef = ref(db, `usage/${todayStr}`);
         onValue(todayRef, (snapshot) => {
             const data = snapshot.val();
@@ -202,18 +202,18 @@
             if (dbData.user_b.isRunning) pauseTimer('user_b');
         };
 
-        // Cập nhật danh sách các Tháng vào Dropdown Bộ Lọc
+        // Cập nhật danh sách các Tháng vào Dropdown
         function updateMonthDropdown(allData) {
-            if (!allData) return;
             const select = document.getElementById('monthSelect');
             const currentSelected = select.value;
             
             const months = new Set();
-            Object.keys(allData).forEach(date => {
-                if (date.length >= 7) months.add(date.substring(0, 7));
-            });
+            if (allData) {
+                Object.keys(allData).forEach(date => {
+                    if (date && date.length >= 7) months.add(date.substring(0, 7));
+                });
+            }
 
-            // Lấy tháng hiện tại
             const currentMonthKey = todayStr.substring(0, 7);
             months.add(currentMonthKey);
 
@@ -227,17 +227,17 @@
                 select.appendChild(opt);
             });
 
-            // Nếu chưa chọn gì, mặc định chọn Tháng Hiện Tại
-            if (!currentSelected) {
-                select.value = currentMonthKey;
-            } else {
+            if (currentSelected && Array.from(select.options).some(o => o.value === currentSelected)) {
                 select.value = currentSelected;
+            } else {
+                select.value = currentMonthKey;
             }
         }
 
-        // Lọc và vẽ lại bảng lịch sử
+        // Render lịch sử an toàn
         window.renderHistory = function() {
             const tbody = document.getElementById('history-table');
+            if (!tbody) return;
             tbody.innerHTML = '';
 
             if (!globalAllData) {
@@ -245,14 +245,14 @@
                 return;
             }
 
-            const selectedMonth = document.getElementById('monthSelect').value;
+            const monthSelectEle = document.getElementById('monthSelect');
+            const selectedMonth = monthSelectEle ? monthSelectEle.value : 'ALL';
             const dates = Object.keys(globalAllData).sort().reverse();
             
             const groupedByMonth = {};
             dates.forEach(date => {
                 const monthKey = date.substring(0, 7);
-                // Nếu lọc theo tháng cụ thể
-                if (selectedMonth !== 'ALL' && monthKey !== selectedMonth) return;
+                if (selectedMonth && selectedMonth !== 'ALL' && monthKey !== selectedMonth) return;
 
                 if (!groupedByMonth[monthKey]) groupedByMonth[monthKey] = [];
                 groupedByMonth[monthKey].push(date);
@@ -268,7 +268,7 @@
                 let monthTotalB = 0;
 
                 groupedByMonth[monthKey].forEach(date => {
-                    const dayData = globalAllData[date];
+                    const dayData = globalAllData[date] || {};
                     const secA = getRealSeconds(dayData.user_a);
                     const secB = getRealSeconds(dayData.user_b);
 
@@ -348,7 +348,7 @@
         <div class="month-filter">
             <label for="monthSelect">🔍 Xem theo tháng:</label>
             <select id="monthSelect" onchange="renderHistory()">
-                <!-- Các tháng tự động đổ vào đây -->
+                <option value="ALL">-- Tất cả các tháng --</option>
             </select>
         </div>
     </div>
